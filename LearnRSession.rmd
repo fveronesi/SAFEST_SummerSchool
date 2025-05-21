@@ -1,0 +1,819 @@
+---
+title: "SAFEST Summer School - Learn R"
+author: "Dr. Fabio Veronesi"
+date: "`r paste0('Last Update: ', format(Sys.time(), '%d %B, %Y - %H:%M'))`"
+
+knit: (function(inputFile, encoding) { rmarkdown::render(inputFile, encoding = encoding, output_file = paste0("SAFEST2024_LearnR.html")) })
+
+output: 
+  html_document:
+    number_sections: no
+    toc: yes
+    toc_depth: 3
+    toc_float:
+      collapsed: true
+      smooth_scroll: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=F, warning=F)
+```
+
+
+# Introduction
+
+This session will try to teach you how to use R to support your research. We will use a real dataset, freely available from NOAA (US National Oceanic and Atmospheric Organization) to learn how to do table manipulation, create plots and perform a few simple spatial operations.
+
+This Markdown document has been created to provide you a go-to guide for your work. If you do not have any previous knowledge of programming languages, do not expect to learn R in just a couple of hours during the course. My objective for Today is to show you what R can do and how it can support your work. I am also providing you with a good code dictionary that you can use and reuse whenever necessary for your own data analysis.
+
+## Packages required
+
+To run the code in this document we need to install and then load a few R packages. The line below allows you to install them (we will load them when necessary):
+
+```{r, eval=F}
+install.packages(c("dplyr","lubridate","readr","ggplot2","Hmisc","ggthemes","sf","rnaturalearth"))
+```
+
+
+## The NOAA archive
+
+For this exercise we will use the [Global Surface Summary of the Day](https://www.ncei.noaa.gov/access/metadata/landing-page/bin/iso?id=gov.noaa.ncdc:C00516) dataset, which is a collection of daily readings (temperature, dew point, pressure, wind speed ect.) from thousands of weather stations located across the globe. 
+
+Access to the data is offered freely through this site where data can be downloaded individually as CSV: [global-summary-of-the-day/acces](https://www.ncei.noaa.gov/data/global-summary-of-the-day/access/) 
+
+
+
+***
+# Tabular Data Manipulation
+
+## Download data
+
+Let's look at one file, from the weather station in Pisa, located at the airport. 
+Since NOAA provides data in CSV, we can simply call the function `read_csv` from the package `readr` and open the file directly from the web:
+
+```{r}
+Pisa_2023 <- readr::read_csv("https://www.ncei.noaa.gov/data/global-summary-of-the-day/access/2023/16158099999.csv")
+```
+
+
+
+We can look at the file with the function `glimpse`:
+
+
+```{r}
+dplyr::glimpse(Pisa_2023)
+```
+
+
+Looking at the output of the function `glimpse` allows us to know the dimensions of the table (365 rows and 28 columns) and how R has read the data. For example, we can see that the majority of numbers are treated as `dbl`, which stands for double-precision float (i.e. a number with decimals), so even the station number instead of an integer is treated as a float. The column DATE is read as `date`, which means that R recognized that this is a date-time column. Some other columns are read as characters, for example NAME (which is the station name), but also a few columns with the `_ATTRIBUTE`.
+
+To know exactly what each variable is, its measurement unit and how it is supposed to be treated by R it is good practice to always refer to the metadata. For this we refer to the NOAA daily summary of the day  [data description](https://www.ncei.noaa.gov/data/global-summary-of-the-day/doc/readme.txt).
+
+
+
+## dplyr pipes
+
+The package `dplyr` provides functions and methods to ease data manipulation. Let's load it and all its dependencies:
+
+```{r}
+library(dplyr)
+```
+
+The dplyr syntax is based on pipes, which are operations that are concatenated into code that is easy to read. An example of the simple pipe is below:
+
+```{r, eval=F}
+Pisa_2023 %>%
+  filter(DATE >= as.Date("2023-05-01"))
+```
+
+The `%>%` is the pipe operator and tells R to continue following the code and concatenate all the operations. As you can see this code is easy to understand, since we are using a function with a name that already explains what we are doing, i.e. filtering the data. 
+
+## Filter verb
+
+The first operation that we are going to learn is `filter`, which allows to extract rows from a table based on a condition.
+In the example above, which we are now going to execute, we are extracting from the original table only dates on or after the 1st of May:
+
+```{r}
+Pisa_2023 %>%
+  filter(DATE >= as.Date("2023-05-01"))
+```
+
+The console output shows us that the operation was successful, since the first DATE shown is the 1st of May. Moreover, it tells us that this new table has 245 rows and this information could be useful if we are filtering to check the data.
+
+As another example of filtering, we can use the column `TEMP_ATTRIBUTES` that reports the "Number of observations used in calculating mean temperature". For a dataset reporting daily temperature, we would expect that the average value has been calculated using at least hourly values (so `TEMP_ATTRIBUTES` equal to 24). However, it may occur that the sensor throws an error and the temperature reading is unusable. With a simple pipe we can check how many days report an average temperature calculated using at least 20 hourly readings:
+
+```{r}
+Pisa_2023 %>%
+  filter(TEMP_ATTRIBUTES >= 20)
+```
+
+## Select verb
+
+Another useful function in `dplyr` is `select`, which allows to extract or eliminate columns from a dataset very easily. For example, now that we know how to filter observations (i.e. rows) where average temperature is calculated from at least 20 hourly readings, and since we are only interested in temperature, we can select only a few columns and reduce the size of the file in memory:
+
+```{r}
+Pisa_2023 %>%
+  filter(TEMP_ATTRIBUTES >= 20) %>% 
+  select(STATION, DATE, TEMP)
+```
+
+In case we simply need to remove one or more columns we can use select in a different way. The pipe below removes the column `TEMP_ATTRIBUTES`, by preceding it with a minus sign:
+
+```{r}
+Pisa_2023 %>%
+  filter(TEMP_ATTRIBUTES >= 20) %>% 
+  select(-TEMP_ATTRIBUTES)
+```
+
+`dplyr` includes additional functions to manipulate whole series of columns. In the pipe below for example, we are removing all columns that contain `_ATTRIBUTES`:
+
+```{r}
+Pisa_2023 %>%
+  filter(TEMP_ATTRIBUTES >= 20) %>% 
+  select(-contains("_ATTRIBUTES"))
+```
+
+Other functions with similar objective can be found [here](https://tidyselect.r-lib.org/reference/starts_with.html).
+
+The function `select` is even more powerful and can be used to re-order and even rename columns:
+
+```{r}
+Pisa_2023 %>%
+  filter(TEMP_ATTRIBUTES >= 20) %>%
+  select(StationID = STATION, Date=DATE, `Temperature (F)` = TEMP, 
+         `Maximum Temperature (F)` = MAX, `Minimum Temperature (F)` = MIN)
+```
+
+Please be aware that `select` will remove all columns that are not included in the call, so if you just want to rename columns you need to use the function `rename`.
+
+```{r}
+Pisa_2023 %>%
+  filter(TEMP_ATTRIBUTES >= 20) %>%
+  rename(`Temperature (F)` = TEMP)
+```
+
+Another important aspect of `dplyr` is that calling a pipes does not modify the original table. So even after filtering rows and selecting columns, the object `Pisa_2023` is unchanged. 
+To save the results of our work we need to store them into a new object:
+
+```{r}
+Pisa_Filtered <- Pisa_2023 %>%
+  filter(TEMP_ATTRIBUTES >= 20) %>%
+  rename(`Temperature (F)` = TEMP)
+```
+
+## Mutate verb
+
+Another useful function is `mutate`, which allows to create or modify existing variables. For example, we may want to modify the variable temperature to be in Celsius. We can do that with:
+
+```{r}
+Pisa_2023 %>%
+  filter(TEMP_ATTRIBUTES >= 20) %>%
+  select(StationID = STATION, Date=DATE, `Temperature (F)` = TEMP) %>%
+  mutate(`Temperature (C)` = round((`Temperature (F)` - 32) * (5/9), 2))
+```
+
+As you can see, I am now concatenating multiple verbs into a single pipe so that I can execute multiple operations at once. 
+
+
+## Handle temporal variables
+
+At this point I think I need to step aside momentarily from `dplyr` and talk a bit about the variable `DATE`. Variables holding date/time data are extremely important in any data science project and we need to learn how to handle them correctly. The package for this is `lubridate`:
+
+```{r}
+library(lubridate)
+```
+
+One of the main objectives of `lubridate` is to ease the translation of date/time variables that perhaps are weirdly formatted into R. It may happen for example to have dates formatted like "20230410", all concatenated into a single number (which R may read as a number).
+`lubridate` provides a series of easy functions to automatically recognize weird formats and convert them into proper ones. The function `ymd` (which stands for year, month, day), can be used here to convert the date above (since we can see that year, month and day are in that order)
+
+```{r}
+ymd("20230410")
+```
+Similarly, the function `dmy` can convert a data were day, month and year are in this order:
+
+```{r}
+dmy("10042023")
+```
+
+More information on the package and its functions [here](https://lubridate.tidyverse.org/)
+
+I often use `lubridate` to change the date format, for example to turn it into monthly values for additional processing. Let's see how we can do that:
+
+```{r}
+Pisa_2023 %>%
+  filter(TEMP_ATTRIBUTES >= 20) %>%
+  select(StationID = STATION, Date=DATE, `Temperature (F)` = TEMP) %>%
+  mutate(`Temperature (C)` = round((`Temperature (F)` - 32) * (5/9), 2)) %>% 
+  select(-`Temperature (F)`) %>% 
+  mutate(Date = ymd(format(Date, format="%Y-%m-15")))
+```
+
+The call I'm using is `ymd(format(Date, "%Y-%m-15"))`, which includes two functions: the outer `ymd` and the inner `format`. The `format` function changes the format of date/time variables.  
+
+In this case I am reformatting `DATE` to have year, month and the number 15 (so that I am removing the actual day and replacing it, as if each observation was taken mid-month). To see all available formats please visit [this page](https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/strptime).
+One issue of the function `format` is that its output is a character, so I need to use the function `ymd` to turn it into a date.
+
+
+## group_by and summarise
+
+The combination of `group_by` and `summarise` is extremely powerful and it is something I personally use daily for my analysis. The function `group_by`, as the name suggests, allows us to run computations on group of data, while `summarise` is what we can use to parse the functions we need to apply to each group.
+
+As an example, we can calculate monthly temperatures from the data we processed above. Since the column `Date` now has been turned into monthly values, we can use this as a grouping column:
+
+```{r}
+Pisa_2023 %>%
+  filter(TEMP_ATTRIBUTES >= 20) %>%
+  select(StationID = STATION, Date=DATE, `Temperature (F)` = TEMP) %>%
+  mutate(`Temperature (C)` = round((`Temperature (F)` - 32) * (5/9), 2)) %>% 
+  select(-`Temperature (F)`) %>% 
+  mutate(Date = ymd(format(Date, format="%Y-%m-15"))) %>% 
+  group_by(Date) %>% 
+  summarise(`Mean Temperature (C)` = mean(`Temperature (C)`))
+```
+
+To run more functions we can simply append them in the `summarise` call:
+
+```{r}
+Pisa_2023 %>%
+  filter(TEMP_ATTRIBUTES >= 20) %>%
+  select(StationID = STATION, Date=DATE, `Temperature (F)` = TEMP) %>%
+  mutate(`Temperature (C)` = round((`Temperature (F)` - 32) * (5/9), 2)) %>% 
+  select(-`Temperature (F)`) %>% 
+  mutate(Date = ymd(format(Date, format="%Y-%m-15"))) %>% 
+  group_by(Date) %>% 
+  summarise(`Mean Temperature (C)` = mean(`Temperature (C)`),
+            `Minimum Temperature (C)` = min(`Temperature (C)`),
+            `Maximum Temperature (C)` = max(`Temperature (C)`))
+```
+
+***
+# Plotting with ggplot2
+
+The package `ggplot2` has become the primary way of creating static charts in R:
+
+```{r}
+library(ggplot2)
+```
+
+## Simple syntax
+
+Similarly to `dplyr`, `ggplot2` works by concatenating operations. The simplest syntax is below:
+
+```{r, eval=F}
+ggplot(data=...,aes(x=..., y=...)) +
+  geom_xxx()
+```
+
+The first line (i.e. a call to the function `ggplot`) is standard and essentially allows you to incorporate the aesthetics of the plot: which variable to plot on the x and y axis, colour (or fill if we are planning to use bars), and size. These are all sort of dynamic parameters that will change based on variables in our dataset, so they must be included inside `aes()`. A plot with just this line will not be created, because we need to tell R what to do with the data.
+
+The second line defines what to plot:
+
+- geom_point: scatterplot
+- geom_line: line chart
+- geom_bar: bar chart
+- geom_boxplot
+- geom_hist
+
+These are just a few examples, but there are many more to choose from.
+
+## First example
+
+Let's say that we want a good way to present a monthly summary of the data we collected from the Pisa weather station, we could simply create a summary table with the function `kable`. This looks better than the simple output of the function, but numerical tables are less accessible than charts.
+
+```{r}
+Pisa_2023 %>%
+  filter(TEMP_ATTRIBUTES >= 20) %>%
+  select(StationID = STATION, Date=DATE, `Temperature (F)` = TEMP) %>%
+  mutate(`Temperature (C)` = round((`Temperature (F)` - 32) * (5/9), 2)) %>% 
+  select(-`Temperature (F)`) %>% 
+  mutate(Date = ymd(format(Date, format="%Y-%m-15"))) %>% 
+  group_by(Date) %>% 
+  summarise(`Mean Temperature (C)` = mean(`Temperature (C)`),
+            `Minimum Temperature (C)` = min(`Temperature (C)`),
+            `Maximum Temperature (C)` = max(`Temperature (C)`)) %>% 
+  knitr::kable()
+```
+
+With a few more lines of code we can turn it into a bar-chart:
+
+```{r}
+Pisa_2023 %>%
+  filter(TEMP_ATTRIBUTES >= 20) %>%
+  select(StationID = STATION, Date=DATE, `Temperature (F)` = TEMP) %>%
+  mutate(`Temperature (C)` = round((`Temperature (F)` - 32) * (5/9), 2)) %>% 
+  select(-`Temperature (F)`) %>% 
+  mutate(Date = ymd(format(Date, format="%Y-%m-15"))) %>% 
+  group_by(Date) %>% 
+  summarise(`Mean Temperature (C)` = mean(`Temperature (C)`),
+            `Minimum Temperature (C)` = min(`Temperature (C)`),
+            `Maximum Temperature (C)` = max(`Temperature (C)`)) %>%
+  ggplot(aes(x=Date, y=`Mean Temperature (C)`)) +
+  geom_bar(stat="identity")
+```
+
+This is my personal preferred way of creating summary bar-charts using `dplyr` and `ggplot2`. Essentially, the `dplyr` pipe takes care of summarising the dataset by month, calculating monthly statistics. The plotting function then only needs to plot what is already calculated, and that is why the option `stat` is set to "identity" (meaning no transformation necessary).
+
+However, `ggplot2` includes functions to do the summary directly into the plot call:
+
+```{r}
+MonthlyData <- Pisa_2023 %>%
+  filter(TEMP_ATTRIBUTES >= 20) %>%
+  select(StationID = STATION, Date=DATE, `Temperature (F)` = TEMP) %>%
+  mutate(`Temperature (C)` = round((`Temperature (F)` - 32) * (5/9), 2)) %>% 
+  select(-`Temperature (F)`) %>% 
+  mutate(Date = ymd(format(Date, format="%Y-%m-15")))
+
+ggplot(data=MonthlyData, aes(x=Date, y=`Temperature (C)`)) +
+  stat_summary(geom = "bar", fun.y = mean)
+```
+
+
+As you can see, the object `MonthlyData` does not include the sequence `group_by` and `summarise`. The column `Date` has been transformed into monthly values, but it is `ggplot2` that computes the mean values directly. 
+
+The advantage of this syntax is that the function `stat_summary` can be easily adapted to accommodate other summary functions (e.g. median), and can also be used to add confidence intervals:
+
+```{r}
+require(Hmisc)
+
+ggplot(data=MonthlyData, aes(x=Date, y=`Temperature (C)`)) +
+  stat_summary(geom = "bar", fun.y = mean) +
+  stat_summary(geom = "errorbar", fun.data = mean_cl_normal, fun.args=list(mult=1.96), width=5)
+```
+
+Here, the function `mean_cl_normal` computes confidence interval as $mean \pm 1.96 \times StdErr_{mean}$ (please notice the `mult=1.96`). We need to make sure the package `Hmisc` is installed to use this function. 
+
+
+
+## Other types of plot
+
+### Histogram
+
+A histogram is a univariate chart, so in the aesthetics we only need to provide a value for x:
+
+```{r}
+ggplot(data=MonthlyData, aes(x=`Temperature (C)`)) +
+  geom_histogram()
+```
+
+### Box-plot
+
+```{r}
+Pisa_2023 %>%
+  filter(TEMP_ATTRIBUTES >= 20) %>%
+  select(StationID = STATION, Date=DATE, `Temperature (F)` = TEMP) %>%
+  mutate(`Temperature (C)` = round((`Temperature (F)` - 32) * (5/9), 2)) %>% 
+  select(-`Temperature (F)`) %>% 
+  mutate(YearMonth = format(Date, format="%Y-%m")) %>% 
+  ggplot(aes(x=YearMonth, y=`Temperature (C)`)) +
+  geom_boxplot()
+```
+
+In this example I slightly changed the date variable to only include Year and Month. Essentially, I just used the function `format` to create a character vector of values like "2023-01", which ggplot2 treats as factors to plot the box-plot.
+
+### Time-Series
+
+Below is a time-series of daily temperature observations:
+
+```{r}
+Pisa_2023 %>%
+  filter(TEMP_ATTRIBUTES >= 20) %>%
+  select(StationID = STATION, Date=DATE, `Temperature (F)` = TEMP) %>%
+  mutate(`Temperature (C)` = (`Temperature (F)` - 32) * (5/9)) %>% 
+  select(-`Temperature (F)`) %>% 
+  ggplot(aes(x=Date, y=`Temperature (C)`)) +
+  geom_line()
+```
+
+Since my objective was to plot daily values, in the code above I did not modify the `Date` column. `ggplot2` automatically recognises that the values to plot on the x axis are date/time so it takes care of visualising them in a easy to interpret way.
+
+### Scatterplot
+
+```{r}
+Pisa_2023 %>%
+  filter(TEMP_ATTRIBUTES >= 20) %>%
+  select(StationID = STATION, Date=DATE, `Temperature (F)` = TEMP, `DewPoint (F)` = DEWP) %>%
+  mutate(`Temperature (C)` = (`Temperature (F)` - 32) * (5/9),
+         `DewPoint (C)` = (`DewPoint (F)` - 32) * (5/9)) %>% 
+  ggplot(aes(x=`DewPoint (C)`, y=`Temperature (C)`)) +
+  geom_point()
+```
+
+## Enhancing our plots
+
+### Theme
+
+By default, `ggplot2` creates charts with grey background that might not be suitable for publications. It is very easy to change that wioth themes, I personally like `theme_minimal`:
+
+```{r}
+PlotData <- Pisa_2023 %>%
+  filter(TEMP_ATTRIBUTES >= 20) %>%
+  mutate(`Temperature (C)` = (TEMP - 32) * (5/9),
+         `DewPoint (C)` = (DEWP - 32) * (5/9),
+         `Wind Speed (m/s)` = WDSP * 0.514444,
+         Month = format(DATE, "%m"))
+
+ggplot(data=PlotData, aes(x=`DewPoint (C)`, y=`Temperature (C)`)) +
+  geom_point() +
+  theme_minimal()
+```
+
+Another popular choice is `theme_bw`:
+
+```{r}
+ggplot(data=PlotData, aes(x=`DewPoint (C)`, y=`Temperature (C)`)) +
+  geom_point() +
+  theme_bw()
+```
+
+
+
+### Color and Fill options
+
+Options `color` (for points and lines), and `fill` (for bars) can be used to change the colour of our charts either statically or dynamically. Below, I include the option `color` outside the aesthetics of the plot just to change the colour of all the dots.
+
+```{r}
+ggplot(data=PlotData, aes(x=`DewPoint (C)`, y=`Temperature (C)`)) +
+  geom_point(color="red") +
+  theme_bw()
+```
+
+However, we often want to use color as a way to present more than 2 variables on the same chart. In this case `color` needs to be included within `aes(...)`:
+
+```{r}
+ggplot(data=PlotData, aes(x=`DewPoint (C)`, y=`Temperature (C)`, color=Month)) +
+  geom_point() +
+  theme_bw()
+```
+
+We can either show a categorical variable, as above, or a numerical variable:
+
+```{r}
+ggplot(data=PlotData, aes(x=`DewPoint (C)`, y=`Temperature (C)`, color=`Wind Speed (m/s)`)) +
+  geom_point() +
+  theme_bw()
+```
+
+R will adapt the colour scale accordingly.
+
+For bar-charts, we need to use the option `fill` (`color` will modify the outline of the bars):
+
+```{r}
+PlotData %>%
+  group_by(Month) %>%
+  summarise(`Average Temperature (C)` = mean(`Temperature (C)`),
+         `Average Wind Speed (m/s)` = mean(`Wind Speed (m/s)`)) %>%
+  ggplot(aes(x=Month, y=`Average Temperature (C)`, fill=`Average Wind Speed (m/s)`)) +
+  geom_bar(stat="identity") +
+  theme_bw()
+```
+
+
+
+### Color scales
+
+#### continuous Variables
+
+In terms of colour scales in `ggplot2` there are many options to choose from depending on what we need to do. I quite like to customise my colour scales, so for continuous variables I tend to use, `scale_color_gradient`, which allows us to set a low and a high colours:
+
+```{r}
+ggplot(data=PlotData, aes(x=`DewPoint (C)`, y=`Temperature (C)`, color=`Wind Speed (m/s)`)) +
+  geom_point() +
+  scale_color_gradient(low="yellow", high="red") +
+  theme_bw()
+```
+
+`scale_color_gradient2`, which allows an intermediate colour to be added:
+
+```{r}
+ggplot(data=PlotData, aes(x=`DewPoint (C)`, y=`Temperature (C)`, color=`Wind Speed (m/s)`)) +
+  geom_point() +
+  scale_color_gradient2(low="yellow", mid="orange", high="red") +
+  theme_bw()
+```
+
+or `scale_color_gradientn`, which gives us full control of the colour scale:
+
+```{r}
+ggplot(data=PlotData, aes(x=`DewPoint (C)`, y=`Temperature (C)`, color=`Wind Speed (m/s)`)) +
+  geom_point() +
+  scale_color_gradientn(colours=c("blue","lightblue","green","orange","red")) +
+  theme_bw()
+```
+
+For bar-charts we simply need to replace `color` with `fill`, therefore use the function `scale_fill_gradient`:
+
+```{r}
+PlotData %>%
+  group_by(Month) %>%
+  summarise(`Average Temperature (C)` = mean(`Temperature (C)`),
+         `Average Wind Speed (m/s)` = mean(`Wind Speed (m/s)`)) %>%
+  ggplot(aes(x=Month, y=`Average Temperature (C)`, fill=`Average Wind Speed (m/s)`))+
+  geom_bar(stat="identity") +
+  scale_fill_gradient(low="blue", high="purple") +
+  theme_bw()
+```
+
+#### Categorical Variables
+
+The key to produce clear plots using categorical variables as `color` is to employ a scale where colours can be distinguish easily. For this reason I once again like to do things manually with the function `scale_color_manual` and `scale_fill_manual`. To find a good set of colours to use I found this contribution from Kevin Wright on stakoverflow: [25 colors that are mostly distinguishable](https://stackoverflow.com/questions/9563711/r-color-palettes-for-many-data-classes)
+
+```{r}
+c25 <- c(
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+  "black", "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70", "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown"
+)
+pie(rep(1, 25), col = c25)
+```
+
+
+We can use these to change the colour for each month. The result will be great, but we need to write a few lines of code to assign a colour to each month:
+
+```{r}
+Col.month <- c("01" = "dodgerblue2",
+                   "02" = "#E31A1C", 
+                   "03" = "green4",
+                   "04" = "#6A3D9A", 
+                   "05" = "#FF7F00", 
+                   "06" = "gold1",
+                   "07" = "skyblue2",
+                   "08" = "#FB9A99", 
+                   "09" = "palegreen2",
+                   "10" = "deeppink1", 
+                   "11" = "black", 
+                   "12" = "gray66")
+
+ggplot(data=PlotData, aes(x=`DewPoint (C)`, y=`Temperature (C)`, color=Month)) +
+  geom_point() +
+  scale_color_manual(values=Col.month) + 
+  theme_bw()
+```
+
+
+## Labels
+
+### Plot Title
+
+The function `labs` can be used to include a title and (if necessary) a subtitle:
+
+```{r}
+ggplot(data=PlotData, aes(x=`DewPoint (C)`, y=`Wind Speed (m/s)`, color=`Temperature (C)`)) +
+  geom_point() +
+  scale_color_gradientn(colours=c("blue","lightblue","green","orange","red")) +
+  labs(title="Pisa", subtitle="Year 2023") +
+  theme_bw()
+```
+
+
+### Axis labels
+
+By default, `ggplot2` uses the variable names as default labels for the axis. In this tutorial, we used appropriate names for the variables, so when plotted the axis labels are informative. However, in many cases variables have names that are more difficult to understand, usually abbreviations that only the developer can decode. When this happens we then need to manually change the axis labels using the two functions `xlab` and `ylab` to change the x and y axis respectively:
+
+```{r}
+ggplot(data=PlotData, aes(x=`DewPoint (C)`, y=`Wind Speed (m/s)`, color=`Temperature (C)`)) +
+  geom_point() +
+  scale_color_gradientn(colours=c("blue","lightblue","green","orange","red")) +
+  labs(title="Pisa", subtitle="Year 2023") +
+  xlab("Dew Point (Degrees Celsius)") +
+  ylab("Wind Speed (meters per second)") +
+  theme_bw()
+```
+
+### Legend Label
+
+To modify the labels in the legend we simply need to add the correct option within `labs`. In this case, since we use the option `color` in the plot, we need to add the same option in `labs`:
+
+```{r}
+ggplot(data=PlotData, aes(x=`DewPoint (C)`, y=`Wind Speed (m/s)`, color=`Temperature (C)`)) +
+  geom_point() +
+  scale_color_gradientn(colours=c("blue","lightblue","green","orange","red")) +
+  labs(title="Pisa", subtitle="Year 2023", color="Temperature (Degrees Celsius)") +
+  xlab("Dew Point (Degrees Celsius)") +
+  ylab("Wind Speed (meters per second)") +
+  theme_bw()
+```
+
+If we used `fill`, the same option should have been used in `labs`.
+
+## Saving Our Results
+
+Very simple, just call the function `ggsave`, which support many image formats (jpg, tif, bmp ect.) and allows us to save images at 300 dpi (which is what we need for publications):
+
+```{r}
+p <- ggplot(data=PlotData, aes(x=`DewPoint (C)`, y=`Wind Speed (m/s)`, color=`Temperature (C)`)) +
+  geom_point() +
+  scale_color_gradientn(colours=c("blue","lightblue","green","orange","red")) +
+  labs(title="Pisa", subtitle="Year 2023", color="Temperature (Degrees Celsius)") +
+  xlab("Dew Point (Degrees Celsius)") +
+  ylab("Wind Speed (meters per second)") +
+  theme_bw()
+
+ggsave(filename = "Plot.tiff", plot = p,  dpi = 300, width = 30, height = 20, units = "cm")
+```
+
+
+
+## References
+
+Clearly, in this course I only covered a small part of what is possible to achieve with `ggplot2`. For more details, this free book will tell you everything you need to know about `ggplot2`:
+
+[ggplot2: Elegant Graphics for Data Analysis](https://ggplot2-book.org/)
+
+
+
+
+
+***
+# Spatial Data Manipulation
+
+In this section we will learn how to use the package `sf`, which allows spatial data manipulation with tidy syntax. 
+
+```{r}
+library(sf)
+```
+
+This package is a relatively recent development, and allows to load spatial dataset in R and then manipulate them with the same `dplyr` syntax we used before. 
+
+
+## Polygon Vector Data
+
+The website [naturalearthdata.com](http://www.naturalearthdata.com) provides free access to spatial data ranging from country borders, to rivers, lake ect.
+
+For this exercise, we need to download country boundaries, which are available in a compressed shp file. We could download the zip, store it somewhere, decompress it and then load the shp in R. However, I thought it is more fun to just do everything directly in R. 
+
+The code below creates a new directory, download the zip file and then decompress it in the directory we just created:
+
+
+```{r}
+URL <- "https://naturalearth.s3.amazonaws.com/110m_cultural/ne_110m_admin_0_countries.zip"
+FileName <- "ne_110m_admin_0_countries.zip"
+
+dir.create(paste0(getwd(),"/Shapefile"))
+
+download.file(URL,
+              destfile=paste0(getwd(),"/Shapefile/",FileName))
+
+unzip(paste0(getwd(),"/Shapefile/",FileName),
+      exdir=paste0(getwd(),"/Shapefile",sep=""))
+```
+
+Now that the file is stored locally we can simply open it with `st_read`:
+
+```{r}
+NatEarth <- st_read("Shapefile/ne_110m_admin_0_countries.shp")
+```
+
+The object `NatEarth` is a spatial object, we can check it by plotting its geometry:
+
+```{r}
+plot(st_geometry(NatEarth))
+```
+
+However, internally the object is treated essentially like any other data frame or table. We can therefore use the same `dplyr` syntax we used above and quickly modify the spatial data. 
+
+Let's do a quick example. 
+
+### Spatial data manipulation
+
+Spatial data can be manipulated using the same `dplyr` syntax we learned above. For example, we can use the function `select` to extract only a few columns from the object `NatEarth` and then filter to extract only the America continent:
+
+```{r}
+NatEarth %>%
+  select(CountryName = ADMIN, Continent = CONTINENT) %>% 
+  filter(Continent %in% c("North America", "South America"))
+```
+
+The package `sf` increases the number of operations we can do on spatial data. In the example below we are computing the area of each country with just a few lines of code:
+
+```{r}
+NatEarth %>%
+  select(CountryName = ADMIN, Continent = CONTINENT) %>% 
+  filter(Continent %in% c("North America", "South America")) %>% 
+  mutate(Area = st_area(.))
+```
+
+### Plotting Geospatial Data
+
+The package `ggplot2` includes functions to deal specifically with `sf` objects:
+
+```{r}
+NatEarth %>%
+  select(CountryName = ADMIN, Continent = CONTINENT) %>% 
+  filter(Continent %in% c("North America", "South America")) %>% 
+  mutate(Area = st_area(.)) %>% 
+  ggplot(aes(fill=as.numeric(Area)))+
+  geom_sf()+
+  labs(fill="Area (m2)")+
+  scale_fill_gradientn(colours=c("blue","lightblue","green","orange","red")) +
+  theme_bw()
+```
+
+In this example, I had to use the function `as.numeric` to turn the values of `Area` into numbers, since the function creates units (i.e. number with a measurement unit attached). Then I used `labs` to change the label of the legend, and a few other functions we learned above.
+
+Now can also use the sequence `group_by` and `summarise` to calculate the area at the continent level:
+
+```{r}
+NatEarth %>%
+  select(CountryName = ADMIN, Continent = CONTINENT) %>%
+  filter(Continent %in% c("North America", "South America")) %>%
+  mutate(Area = st_area(.)) %>% 
+  group_by(Continent) %>%
+  summarise(TotalArea = sum(Area, na.rm=T))
+```
+
+
+Since we are working on a spatial object, the operations we just did had an effect on the geometry as well:
+
+```{r}
+NatEarth %>%
+  select(CountryName = ADMIN, IsoCode = ISO_A3, Continent = CONTINENT) %>% 
+  filter(Continent %in% c("North America", "South America")) %>%
+  mutate(Area = st_area(.)) %>% 
+  group_by(Continent) %>%
+  summarise(TotalArea = sum(Area, na.rm=T)) %>% 
+  ggplot(aes(fill=as.numeric(TotalArea)))+
+  geom_sf()+
+  labs(fill="Area (m2)")+
+  scale_fill_gradientn(colours=c("blue","lightblue","green","orange","red")) +
+  theme_bw()
+```
+
+
+
+## Spatial Point Data
+
+NOAA provides a lookup table in csv will data like coordinates for all weather stations in its network. We can use this table to extract IDs of the stations located in Italy. The table can be opened directly from the web:
+
+```{r}
+stations <- readr::read_csv("https://www.ncei.noaa.gov/pub/data/noaa/isd-history.csv")
+```
+
+Let's look at it quickly:
+
+```{r}
+dplyr::glimpse(stations)
+```
+
+Useful information for us are: 
+
+- USAF: which is the unique ID of the station
+- LAT and LON: coordinates 
+- BEGIN and END: first and last observation in the database for that station.
+
+### From tibble to spatial object
+
+For the time being, the object `stations` is a data.frame and not a spatial object. We can turn it into an object of class `sf` with the following lines:
+
+```{r}
+NOAA.Spatial <- stations %>%
+  filter(!is.na(LON) & !is.na(LAT) | LON>0 & LAT>0) %>%
+  st_as_sf(coords = c("LON", "LAT"),
+           crs=st_crs(4326))
+
+plot(NOAA.Spatial["ELEV(M)"], pch=16, cex=0.7)
+```
+
+As you can see the globe is pretty well covered. 
+
+## Intersecting Spatial Point with Polygons
+
+Let's say that we now need to extract only weather stations physically located in Italy. To do that we need to intersect the spatial point data with the Natural Earth polygon of Italy. We can do that with the function `st_intersection`:
+
+```{r}
+Italy <- NatEarth %>%
+  select(CountryName = ADMIN) %>%
+  filter(CountryName == "Italy")
+
+NOAA.Italy <- st_intersection(NOAA.Spatial, Italy)
+```
+
+The resulting object is a spatial point collection, with all columns from the object `NOAA.Spatial`, plus all columns from the object `Italy` (in this case just `CountryName`).
+
+To check that the operation has been performed correctly we can plot its result:
+
+```{r}
+ggplot()+
+  geom_sf(data=Italy)+
+  geom_sf(data=NOAA.Italy)+
+  theme_bw()
+```
+
+
+## References
+
+I only touched upon the use of R for spatial data analysis, if you want to learn more please refer to these two free resources:
+
+- [Geocomputation in R](https://r.geocompx.org/)
+- [Spatial Data Science with R](https://rspatial.org/index.html)
+
+
